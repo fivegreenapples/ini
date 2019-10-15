@@ -272,9 +272,9 @@ func (me *canonical) String() string {
 	return str
 }
 
-// addSection creates a new section using the lowercase value of s. If a section
+// makeSection creates a new section using the lowercase value of s. If a section
 // with this name exists, it will be returned instead.
-func (me *canonical) addSection(s string) *section {
+func (me *canonical) makeSection(s string) *section {
 
 	// Create a new section if necessary
 	sectionName := strings.ToLower(s)

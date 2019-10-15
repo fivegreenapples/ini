@@ -15,7 +15,8 @@ func Marshal(v interface{}) ([]byte, error) {
 
 	var err error
 	canonical := newCanonical()
-	val, _, isNilPointer, origType := dereference(reflect.ValueOf(v))
+	origType := reflect.TypeOf(v)
+	val, _, isNilPointer := dereference(reflect.ValueOf(v))
 
 	if isNilPointer {
 		return nil, errors.New("can not marshal a nil pointer")
@@ -41,10 +42,7 @@ func Marshal(v interface{}) ([]byte, error) {
 
 func marshalValue(name string, val reflect.Value, into *canonical, at *section) error {
 
-	// todo pointers here
-	// note nil pointers to structs or maps should probably be empty sections?
-
-	val, typ, isNilPointer, _ := dereference(val)
+	val, typ, isNilPointer := dereference(val)
 
 	// switch on typ.Kind() not val.Kind() because val will be the zero value when
 	// incoming val is a nil pointer.
@@ -56,7 +54,7 @@ func marshalValue(name string, val reflect.Value, into *canonical, at *section) 
 		}
 
 		// Create a new section as necessary
-		section := into.addSection(name)
+		section := into.makeSection(name)
 
 		// Marshal into it unless we have a nil pointer - in which case leave this
 		// as an empty section.
@@ -74,9 +72,18 @@ func marshalValue(name string, val reflect.Value, into *canonical, at *section) 
 		}
 		iter := val.MapRange()
 		for iter.Next() {
-			k, _ := marshalScalarValue(iter.Key()) // todo handle these errors
-			v, _ := marshalScalarValue(iter.Value())
-			at.addMapValue(name, k, v)
+			k, mapKeyErr := marshalScalarValue(iter.Key())
+			if mapKeyErr != nil {
+				return fmt.Errorf("marshaling map key: %w", mapKeyErr)
+			}
+			v, mapValErr := marshalScalarValue(iter.Value())
+			if mapValErr != nil {
+				return fmt.Errorf("marshaling map value: %w", mapValErr)
+			}
+			mapErr := at.addMapValue(name, k, v)
+			if mapErr != nil {
+				return fmt.Errorf("adding map value: %w", mapErr)
+			}
 		}
 
 	case reflect.Slice, reflect.Array:
@@ -89,7 +96,10 @@ func marshalValue(name string, val reflect.Value, into *canonical, at *section) 
 			if scalarErr != nil {
 				return fmt.Errorf("marshaling slice element: %w", scalarErr)
 			}
-			at.addArrayValue(name, scalarVal)
+			arrayErr := at.addArrayValue(name, scalarVal)
+			if arrayErr != nil {
+				return fmt.Errorf("adding array value: %w", arrayErr)
+			}
 		}
 
 	default:
@@ -101,7 +111,10 @@ func marshalValue(name string, val reflect.Value, into *canonical, at *section) 
 		if at == nil {
 			at = into.global
 		}
-		at.addScalarValue(name, scalarVal)
+		scalarAddErr := at.addScalarValue(name, scalarVal)
+		if scalarAddErr != nil {
+			return fmt.Errorf("adding scalar value: %w", scalarAddErr)
+		}
 	}
 
 	return nil
@@ -155,14 +168,15 @@ func marshalMap(v interface{}, into *canonical) error {
 
 func marshalScalarValue(val reflect.Value) (string, error) {
 
-	val, typ, isNilPointer, origType := dereference(val)
+	origType := val.Type()
+	val, _, isNilPointer := dereference(val)
 
 	if isNilPointer {
 		// Marshall nil pointer as empty string
 		return "", nil
 	}
 
-	switch typ.Kind() {
+	switch val.Kind() {
 	case reflect.Bool:
 		if val.Bool() {
 			return "1", nil
